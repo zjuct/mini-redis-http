@@ -22,8 +22,14 @@ use std::sync::Arc;
 pub struct S;
 
 lazy_static! {
-	static ref DB: Mutex<HashMap<String, String>> = Mutex::new(HashMap::new());
-	static ref CHANNEL: Mutex<HashMap<String, Arc<Sender<String>>>> = Mutex::new(HashMap::new());
+	static ref DB: Mutex<HashMap<String, String>> = {
+		println!("Init DB");
+		Mutex::new(HashMap::new())
+	};
+	static ref CHANNEL: Mutex<HashMap<String, Arc<Sender<String>>>> = {
+		println!("Init CHANNLE");
+		Mutex::new(HashMap::new())
+	};
 }
 
 const CHANNEL_SIZE: usize = 16;
@@ -53,6 +59,7 @@ impl volo_gen::volo::example::ItemService for S {
 		::core::result::Result<GetResponse, ::volo_thrift::AnyhowError> {
 		let t = DB.lock().await;
 		let res = (*t).get(&_req.key.into_string());
+		println!("a: {}", (*t).get(&String::from("a")).unwrap());
 		
 		match res {
 			Some(value) => Ok(GetResponse { value: Some(value.clone().parse().unwrap()) }),
@@ -73,24 +80,22 @@ impl volo_gen::volo::example::ItemService for S {
 		Ok(DelResponse { num })
 	}
 
+	// 简化的publish，不返回接收方的数量和channel名
 	async fn publish(&self, _req: PublishRequest) ->
 		::core::result::Result<PublishResponse, ::volo_thrift::AnyhowError> {
 		let t = CHANNEL.lock().await;
 		let res = (*t).get(&_req.channel.into_string());
 		println!("publish get lock");
 
-		let num = match res {
+		match res {
 			Some(sender) => {
-				println!("send");
 				let _  = sender.send(_req.msg.into_string());
-				1
 			},
 			None => {
 				println!("channel not exist");
-				0
 			}
-		};
-		Ok(PublishResponse { num })
+		}
+		Ok(PublishResponse { })
 	}
 
 	async fn subscribe(&self, _req: SubscribeRequest) ->

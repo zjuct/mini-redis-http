@@ -43,9 +43,7 @@ struct PublishRequest {
     2: required string msg,
 }
 
-struct PublishResponse {
-    1: required i64 num,
-}
+struct PublishResponse {}
 
 // SUBSCRIBE
 struct SubscribeRequest {
