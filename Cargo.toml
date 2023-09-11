@@ -16,6 +16,10 @@ anyhow.workspace = true
 async-trait.workspace = true
 tokio = { workspace = true, features = ["full"] }
 
+lazy_static.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
 [profile.release]
 opt-level = 3
 debug = true
@@ -44,3 +48,7 @@ pilota = "*"
 anyhow = "1"
 async-trait = "0.1"
 tokio = "1"
+
+lazy_static = "1"
+tracing = "0.1"
+tracing-subscriber = "0.3"

@@ -696,8 +696,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "lazy_static",
  "pilota",
  "tokio",
+ "tracing",
+ "tracing-subscriber",
  "volo",
  "volo-gen",
  "volo-thrift",
