@@ -3,11 +3,14 @@ use lazy_static::lazy_static;
 use pilota::FastStr;
 use std::net::SocketAddr;
 
+
 use volo_gen::volo::example::{
     PingRequest,
     SetRequest,
     GetRequest,
     DelRequest,
+    PublishRequest,
+    SubscribeRequest,
 };
 
 lazy_static! {
@@ -22,6 +25,27 @@ lazy_static! {
 #[volo::main]
 async fn main() {
     tracing_subscriber::fmt::init();
+
+    let args: Vec<String> = std::env::args().collect();
+    match args[1].as_str() {
+        "sub" => {
+            assert!(args.len() >= 3);
+            println!("sub channel: {}", &args[2]);
+            let mut channels: Vec<String> = Vec::new();
+            for channel in &args[2..] {
+                channels.push(channel.clone());
+            }
+            let msg = subscribe(channels).await.unwrap();
+            println!("{msg}");
+        },
+        "pub" => {
+            assert_eq!(args.len(), 4);
+            println!("pub {} {}", &args[2], &args[3]);
+            let num = publish(args[2].clone(), args[3].clone()).await.unwrap();
+            println!("{num}");
+        },
+        _ => {}
+    }
 }
 
 #[allow(dead_code)]
@@ -64,6 +88,25 @@ async fn del(keys: Vec<String>) -> Result<i64, anyhow::Error> {
     };
     let res = CLIENT.del(req).await?;
     Ok(res.num)
+}
+
+#[allow(dead_code)]
+async fn publish(channel: String, msg: String) -> Result<i64, anyhow::Error> {
+    let req = PublishRequest {
+        channel: FastStr::new(channel),
+        msg: FastStr::new(msg),
+    };
+    let res = CLIENT.publish(req).await?;
+    Ok(res.num)
+}
+
+#[allow(dead_code)]
+async fn subscribe(channels: Vec<String>) -> Result<String, anyhow::Error> {
+    let req = SubscribeRequest {
+        channels: channels.into_iter().map(|c| FastStr::new(c)).collect(),
+    };
+    let res = CLIENT.subscribe(req).await?;
+    Ok(res.msg.into_string())
 }
 
 #[cfg(test)]
