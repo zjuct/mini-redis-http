@@ -9,7 +9,6 @@ use volo_gen::volo::example::{
 	DelRequest, DelResponse,
 	PublishRequest, PublishResponse,
 	SubscribeRequest, SubscribeResponse,
-	ItemServiceRequestSend,
 };
 use tokio::{
 	task::JoinSet,
@@ -20,8 +19,6 @@ use tokio::{
 };
 use std::{collections::HashMap, future::Future};
 use std::sync::Arc;
-
-use motore::BoxError;
 
 pub struct S;
 

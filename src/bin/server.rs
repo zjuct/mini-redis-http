@@ -2,8 +2,7 @@
 
 use std::net::SocketAddr;
 
-use mini_redis::{S};
-use mini_redis::FilterLayer;
+use mini_redis::S;
 
 #[volo::main]
 async fn main() {
