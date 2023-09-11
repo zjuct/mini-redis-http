@@ -697,6 +697,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "lazy_static",
+ "motore",
  "pilota",
  "tokio",
  "tracing",

@@ -12,10 +12,13 @@ use volo_gen::volo::example::{
     SubscribeRequest,
 };
 
+use mini_redis::FilterLayer;
+
 lazy_static! {
     static ref CLIENT: volo_gen::volo::example::ItemServiceClient = {
         let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
         volo_gen::volo::example::ItemServiceClientBuilder::new("volo-example")
+            .layer_outer(FilterLayer)
             .address(addr)
             .build()
     };
@@ -225,7 +228,7 @@ async fn publish(channel: String, msg: String) -> Result<(), anyhow::Error> {
         channel: FastStr::new(channel),
         msg: FastStr::new(msg),
     };
-    let res = CLIENT.publish(req).await?;
+    let _ = CLIENT.publish(req).await?;
     Ok(())
 }
 

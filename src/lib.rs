@@ -1,5 +1,6 @@
 #![feature(impl_trait_in_assoc_type)]
 
+use anyhow::anyhow;
 use pilota::{lazy_static::lazy_static, FastStr};
 use volo_gen::volo::example::{
 	PingRequest, PingResponse,
@@ -8,6 +9,7 @@ use volo_gen::volo::example::{
 	DelRequest, DelResponse,
 	PublishRequest, PublishResponse,
 	SubscribeRequest, SubscribeResponse,
+	ItemServiceRequestSend,
 };
 use tokio::{
 	task::JoinSet,
@@ -16,8 +18,10 @@ use tokio::{
 		broadcast::{Sender, Receiver},
 	},
 };
-use std::collections::HashMap;
+use std::{collections::HashMap, future::Future};
 use std::sync::Arc;
+
+use motore::BoxError;
 
 pub struct S;
 
@@ -137,5 +141,45 @@ impl volo_gen::volo::example::ItemService for S {
 		Ok(SubscribeResponse {
 			msg: FastStr::new(msg),
 		})
+	}
+}
+
+#[derive(Clone)]
+pub struct FilterService<S>(S);
+
+impl<Cx, Req, S> volo::Service<Cx, Req> for FilterService<S> 
+where
+	Req: 'static + Send,
+	S: volo::Service<Cx, Req> + 'static + Send + Sync,
+ 	Req : std::fmt::Debug,
+	S::Error: Send + Sync + Into<volo_thrift::Error>,
+	Cx: 'static + Send,
+{
+	type Response = S::Response;
+
+	type Error = volo_thrift::Error;
+
+	type Future<'cx> = impl Future<Output = Result<S::Response, Self::Error>> + 'cx;
+
+	fn call<'cx, 's>(&'s self, cx: &'cx mut Cx, req: Req) -> Self::Future<'cx>
+	where
+		's: 'cx,
+	{
+		async move {
+			if format!("{:?}", req).starts_with("Ping") {
+				return Err(anyhow!("can not use ping").into());
+			}
+			self.0.call(cx, req).await.map_err(Into::into)
+		}
+	}
+}
+
+pub struct FilterLayer;
+
+impl<S> volo::Layer<S> for FilterLayer {
+	type Service = FilterService<S>;
+
+	fn layer(self, inner: S) -> Self::Service {
+		FilterService(inner)
 	}
 }

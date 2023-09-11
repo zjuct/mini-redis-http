@@ -20,6 +20,8 @@ lazy_static.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 
+motore.workspace = true
+
 [profile.release]
 opt-level = 3
 debug = true
@@ -52,3 +54,5 @@ tokio = "1"
 lazy_static = "1"
 tracing = "0.1"
 tracing-subscriber = "0.3"
+
+motore = "0.3.3"
