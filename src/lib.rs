@@ -63,7 +63,6 @@ impl volo_gen::volo::example::ItemService for S {
 		::core::result::Result<GetResponse, ::volo_thrift::AnyhowError> {
 		let t = DB.lock().await;
 		let res = (*t).get(&_req.key.into_string());
-		println!("a: {}", (*t).get(&String::from("a")).unwrap());
 		
 		match res {
 			Some(value) => Ok(GetResponse { value: Some(value.clone().parse().unwrap()) }),
@@ -127,7 +126,6 @@ impl volo_gen::volo::example::ItemService for S {
 		// 先暂时用drop(t)顶一下
 		drop(t);
 		// return the first message received
-		// test: only consider the first channel
 		let mut js = JoinSet::new();
 
 		for mut receiver in receivers.into_iter() {

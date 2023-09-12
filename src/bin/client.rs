@@ -1,297 +1,226 @@
+// RPC Client & HTTP Server
 use lazy_static::lazy_static;
 use pilota::FastStr;
-use std::{net::SocketAddr, thread};
-use tokio::sync::broadcast;
+use reqwest::StatusCode;
+use tracing_subscriber::prelude::__tracing_subscriber_SubscriberExt;
+use std::net::SocketAddr;
+
+use axum::{
+    Router,
+    response::{IntoResponse, Response, Html},
+    extract::Path,
+    routing,
+    Form,
+};
 
 use volo_gen::volo::example::{
     PingRequest,
     SetRequest,
     GetRequest,
     DelRequest,
-    PublishRequest,
     SubscribeRequest,
-    ItemServiceRequestSend,
-    ItemServicePingArgsSend,
+    PublishRequest,
 };
 
-use mini_redis::FilterLayer;
+use tracing_subscriber::{fmt, util::SubscriberInitExt};
 
-fn filter_ping_evil(req: ItemServiceRequestSend) -> bool {
-    match req {
-        ItemServiceRequestSend::Ping(ItemServicePingArgsSend { req: PingRequest { payload } }) => {
-            match payload {
-                Some(payload) => {
-                    if payload.to_lowercase().starts_with("evil") {
-                        return false;
-                    }
-                    true
-                },
-                None => {
-                    true
-                },
-            }
-        },
-        _ => {
-            true
-        }
-    }
-}
+use serde::Deserialize;
+
+pub const RPC_ADDR: &str = "127.0.0.1:8080";
 
 lazy_static! {
     static ref CLIENT: volo_gen::volo::example::ItemServiceClient = {
-        let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
+        let addr: SocketAddr = RPC_ADDR.parse().unwrap();
         volo_gen::volo::example::ItemServiceClientBuilder::new("volo-example")
-            .layer_outer(FilterLayer::new(filter_ping_evil))
             .address(addr)
             .build()
     };
 }
 
-#[derive(Clone, Debug)]
-enum Input {
-    Ping(Option<String>),
-    Set(String, String),
-    Get(String),
-    Del(Vec<String>),
-    Publish(String, String),
-    Subscribe(Vec<String>),
-}
-
 #[volo::main]
 async fn main() {
-    tracing_subscriber::fmt::init();
+//     tracing_subscriber::fmt::init();
+    tracing_subscriber::registry().with(fmt::layer()).init();
 
-    // spawn a thread to handle user input
-    let (send, mut recv): (broadcast::Sender<Input>, broadcast::Receiver<Input>) = broadcast::channel(16); 
-    thread::spawn(move || {
-        get_input(send);
-    });
+    let app = Router::new()
+        .route("/ping", routing::get(ping))
+        .route("/ping/:payload", routing::get(ping_sth))
+        .route("/get/:key", routing::get(get))
+        .route(
+            "/set",
+            routing::get(show_set_form).post(set)
+        )
+        .route("/del", routing::get(show_del_form).post(del))
+        .route("/subscribe", routing::get(show_subscribe_form).post(subscribe))
+        .route("/publish", routing::get(show_publish_form).post(publish));
 
-    loop {
-        match recv.recv().await {
-            Ok(input) => handle_input(input).await,
-            Err(_) => break,
-        }
-    }
+    let addr = SocketAddr::from(([127, 0, 0, 1], 13784));
+    axum::Server::bind(&addr)
+        .serve(app.into_make_service())
+        .await
+        .unwrap();
 }
 
-fn get_input(send: broadcast::Sender<Input>) {
-    let mut quit = false;
-    while !quit {
-        let mut buf = String::new();
-        std::io::stdin()
-            .read_line(&mut buf)
-            .unwrap();
-
-        
-        let input_vec: Vec<&str> = buf.split_whitespace().collect();
-        if input_vec.len() == 0 {
-            continue;
-        }
-        match input_vec[0].to_uppercase().as_str() {
-            "PING" => {
-                match input_vec.len() {
-                    1 => {
-                        send.send(Input::Ping(None)).unwrap();
-                    },
-                    2 => {
-                        send.send(Input::Ping(Some(String::from(input_vec[1])))).unwrap();
-                    },
-                    _ => {
-                        println!("Invalid format of PING");
-                    }
-                }
-            },
-            "SET" => {
-                match input_vec.len() {
-                    3 => {
-                        send.send(Input::Set(String::from(input_vec[1]), String::from(input_vec[2]))).unwrap();
-                    },
-                    _ => {
-                        println!("Invalid format of SET");
-                    }
-                }
-            },
-            "GET" => {
-                match input_vec.len() {
-                    2 => {
-                        send.send(Input::Get(String::from(input_vec[1]))).unwrap();
-                    },
-                    _ => {
-                        println!("Invalid format of GET");
-                    }
-                }
-            },
-            "DEL" => {
-                match input_vec.len() {
-                    1 => {
-                        println!("Invalid format of DEL");
-                    },
-                    _ => {
-                        send.send(Input::Del(
-                            input_vec[1..].iter().map(|s| String::from(*s)).collect()
-                        )).unwrap();
-                    }
-                }
-            },
-            "PUBLISH" => {
-                match input_vec.len() {
-                    3 => {
-                        send.send(Input::Publish(String::from(input_vec[1]), String::from(input_vec[2]))).unwrap();
-                    },
-                    _ => {
-                        println!("Invalid format of PUBLISH");
-                    }
-                }
-            },
-            "SUBSCRIBE" => {
-                match input_vec.len() {
-                    1 => {
-                        println!("Invalid format of SUBSCRIBE");
-                    },
-                    _ => {
-                        send.send(Input::Subscribe(
-                            input_vec[1..].iter().map(|s| String::from(*s)).collect()
-                        )).unwrap();
-                    }
-                }
-            },
-            "QUIT" => {
-                quit = true;
-            },
-            _ => {
-                println!("Invalid input");
-            }
-        }
-    }
+async fn ping() -> (StatusCode, &'static str) {
+    (StatusCode::OK, "pong")
 }
 
-async fn handle_input(input: Input) {
-    match input {
-        Input::Ping(payload) => {
-            let res = ping(payload).await.unwrap();
-            println!("{}", res);
-        },
-        Input::Set(key, value) => {
-            set(key, value).await.unwrap();
-        },
-        Input::Get(key) => {
-            let res = get(key).await.unwrap();
-            match res {
-                Some(value) => {
-                    println!("{value}");
-                },
-                None => {
-                    println!("{{nil}}");
-                }
-            }
-        },
-        Input::Del(key) => {
-            let res = del(key).await.unwrap();
-            println!("{res}");
-        },
-        Input::Publish(channel, msg) => {
-            let _ = publish(channel, msg).await.unwrap();
-        },
-        Input::Subscribe(channels) => {
-            let res = subscribe(channels).await.unwrap();
-            println!("{res}");
-        }
-    }
-}
-
-#[allow(dead_code)]
-async fn ping(payload: Option<String>) -> Result<String, anyhow::Error> {
-    let req = match payload {
-        Some(payload) => PingRequest { payload: Some(FastStr::new(payload)) },
-        None => PingRequest { payload: None },
+async fn ping_sth(Path(key): Path<String>) -> Response{
+    let req = PingRequest {
+        payload: Some(FastStr::new(key)),
     };
-    let res = CLIENT.ping(req).await?;
-    Ok(res.payload.into_string())
+    let res = CLIENT.ping(req).await.unwrap();
+    (StatusCode::OK, res.payload.into_string()).into_response()
 }
 
-#[allow(dead_code)]
-async fn set(key: String, value: String) -> Result<(), anyhow::Error> {
-    let req = SetRequest {
-        key: FastStr::new(key),
-        value: FastStr::new(value),
-    };
-    let res = CLIENT.set(req).await?;
-    println!("{}", res.status.into_string());
-    Ok(())
-}
-
-#[allow(dead_code)]
-async fn get(key: String) -> Result<Option<String>, anyhow::Error> {
+async fn get(Path(key): Path<String>) -> Response {
+    tracing::debug!("GET {}", key);
     let req = GetRequest {
         key: FastStr::new(key),
     };
-    let res = CLIENT.get(req).await?;
+    let res = CLIENT.get(req).await.unwrap();
     match res.value {
-        Some(value) => Ok(Some(value.into_string())),
-        None => Ok(None),
+        Some(value) => {
+            (StatusCode::OK, value.into_string()).into_response()
+        }
+        None => {
+            (StatusCode::OK, "{{nil}}").into_response()
+        }
     }
 }
 
-#[allow(dead_code)]
-async fn del(keys: Vec<String>) -> Result<i64, anyhow::Error> {
+async fn show_set_form() -> Html<&'static str> {
+    Html(
+        r#"
+        <!doctype html>
+        <html>
+            <head></head>
+            <body>
+                <form action="/set" method="post">
+                    <label for="key">
+                        Enter key:
+                        <input type="text" name="key">
+                    </label>
+                    <label for="value">
+                        Enter value:
+                        <input type="text" name="value">
+                    </label>
+                    <input type="submit" value="Set!">
+                </form>
+            </body>
+        </html>
+        "#,
+    )
+}
+
+#[derive(Deserialize, Debug)]
+struct FormKeyValue {
+    key: String,
+    value: String,
+}
+
+#[derive(Deserialize, Debug)]
+struct FormKey {
+    key: String,
+}
+
+async fn set(Form(setkey): Form<FormKeyValue>) -> Response {
+    tracing::debug!("SET {} {}", setkey.key, setkey.value);
+    let req = SetRequest {
+        key: FastStr::new(setkey.key),
+        value: FastStr::new(setkey.value),
+    };
+    let _ = CLIENT.set(req).await.unwrap();
+    (StatusCode::OK, "set success").into_response()
+}
+
+async fn show_del_form() -> Html<&'static str> {
+    Html(
+        r#"
+        <!doctype html>
+        <html>
+            <head></head>
+            <body>
+                <form action="/del" method="post">
+                    <label for="key">
+                        Enter key:
+                        <input type="text" name="key">
+                    </label>
+                    <input type="submit" value="Delete!">
+                </form>
+            </body>
+        </html>
+        "#,
+    )
+}
+
+async fn del(Form(delkey): Form<FormKey>) -> (StatusCode, &'static str) {
     let req = DelRequest {
-        keys: keys.into_iter().map(|k| FastStr::new(k)).collect(),
+        keys: vec![FastStr::new(delkey.key)],
     };
-    let res = CLIENT.del(req).await?;
-    Ok(res.num)
+    let _ = CLIENT.del(req).await.unwrap();
+    (StatusCode::OK, "del success")
 }
 
-#[allow(dead_code)]
-async fn publish(channel: String, msg: String) -> Result<(), anyhow::Error> {
-    let req = PublishRequest {
-        channel: FastStr::new(channel),
-        msg: FastStr::new(msg),
-    };
-    let _ = CLIENT.publish(req).await?;
-    Ok(())
+async fn show_subscribe_form() -> Html<&'static str> {
+    Html(
+        r#"
+        <!doctype html>
+        <html>
+            <head></head>
+            <body>
+                <form action="/subscribe" method="post">
+                    <label for="key">
+                        Enter channel:
+                        <input type="text" name="key">
+                    </label>
+                    <input type="submit" value="Subscribe!">
+                </form>
+            </body>
+        </html>
+        "#,
+    )
 }
 
-#[allow(dead_code)]
-async fn subscribe(channels: Vec<String>) -> Result<String, anyhow::Error> {
+async fn subscribe(Form(channel): Form<FormKey>) -> Response {
     let req = SubscribeRequest {
-        channels: channels.into_iter().map(|c| FastStr::new(c)).collect(),
+        channels: vec![FastStr::new(channel.key)],
     };
-    let res = CLIENT.subscribe(req).await?;
-    Ok(res.msg.into_string())
+
+    let res = CLIENT.subscribe(req).await.unwrap();
+    (StatusCode::OK, res.msg.into_string()).into_response()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+async fn show_publish_form() -> Html<&'static str> {
+    Html(
+        r#"
+        <!doctype html>
+        <html>
+            <head></head>
+            <body>
+                <form action="/publish" method="post">
+                    <label for="key">
+                        Enter channel:
+                        <input type="text" name="key">
+                    </label>
+                    <label for="value">
+                        Enter message:
+                        <input type="text" name="value">
+                    </label>
+                    <input type="submit" value="Publish!">
+                </form>
+            </body>
+        </html>
+        "#,
+    )
+}
 
-    #[tokio::test]
-    async fn ping_test() {
-        assert_eq!(ping(Some(String::from("abc"))).await.unwrap(), "abc");
-        assert_eq!(ping(None).await.unwrap(), "PONG");
-        assert_eq!(ping(Some(String::from("   hello\nworld   "))).await.unwrap(), "   hello\nworld   ");
-    }
+async fn publish(Form(publ): Form<FormKeyValue>) -> (StatusCode, &'static str) {
+    let req = PublishRequest {
+        channel: FastStr::new(publ.key),
+        msg: FastStr::new(publ.value),
+    };
+    let _ = CLIENT.publish(req).await.unwrap();
 
-    #[tokio::test]
-    async fn get_set_del_test() {
-        set(String::from("abc"), String::from("def")).await.unwrap();
-        set(String::from("hello"), String::from("world")).await.unwrap();
-        
-        assert_eq!(get(String::from("abc")).await.unwrap(), Some(String::from("def")));
-        assert_eq!(get(String::from("hello")).await.unwrap(), Some(String::from("world")));
-        assert_eq!(get(String::from("abd")).await.unwrap(), None);
-
-        set(String::from("abc"), String::from("hij")).await.unwrap();
-        set(String::from("aaa"), String::from("bbb")).await.unwrap();
-        assert_eq!(get(String::from("abc")).await.unwrap(), Some(String::from("hij")));
-        
-        assert_eq!(del(vec![String::from("abc"), String::from("aaa")]).await.unwrap(), 2);
-        assert_eq!(get(String::from("abc")).await.unwrap(), None);
-        assert_eq!(get(String::from("aaa")).await.unwrap(), None);
-
-        assert_eq!(del(vec![String::from("hello"), String::from("world")]).await.unwrap(), 1);
-        assert_eq!(get(String::from("hello")).await.unwrap(), None);
-
-        assert_eq!(del(vec![]).await.unwrap(), 0);
-    }
+    (StatusCode::OK, "puslish success")
 }

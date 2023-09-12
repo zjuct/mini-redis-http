@@ -22,6 +22,10 @@ tracing-subscriber.workspace = true
 
 motore.workspace = true
 
+axum.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+
 [profile.release]
 opt-level = 3
 debug = true
@@ -56,3 +60,6 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 
 motore = "0.3.3"
+axum = { version = "0.6.20" }
+reqwest = "0.11"
+serde = "1.0.188"
