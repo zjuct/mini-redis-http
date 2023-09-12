@@ -1,6 +1,5 @@
 #![feature(impl_trait_in_assoc_type)]
 
-use anyhow::anyhow;
 use pilota::{lazy_static::lazy_static, FastStr};
 use volo_gen::volo::example::{
 	PingRequest, PingResponse,
@@ -9,6 +8,7 @@ use volo_gen::volo::example::{
 	DelRequest, DelResponse,
 	PublishRequest, PublishResponse,
 	SubscribeRequest, SubscribeResponse,
+	ItemServiceRequestSend,
 };
 use tokio::{
 	task::JoinSet,
@@ -19,6 +19,7 @@ use tokio::{
 };
 use std::{collections::HashMap, future::Future};
 use std::sync::Arc;
+
 
 pub struct S;
 
@@ -34,6 +35,8 @@ lazy_static! {
 }
 
 const CHANNEL_SIZE: usize = 16;
+const ANSI_RED: &str = "\x1b[0;31m";
+const ANSI_END: &str = "\x1b[0m";
 
 #[volo::async_trait]
 impl volo_gen::volo::example::ItemService for S {
@@ -142,41 +145,92 @@ impl volo_gen::volo::example::ItemService for S {
 }
 
 #[derive(Clone)]
-pub struct FilterService<S>(S);
-
-impl<Cx, Req, S> volo::Service<Cx, Req> for FilterService<S> 
+pub struct FilterService<S, P>
 where
-	Req: 'static + Send,
-	S: volo::Service<Cx, Req> + 'static + Send + Sync,
- 	Req : std::fmt::Debug,
-	S::Error: Send + Sync + Into<volo_thrift::Error>,
-	Cx: 'static + Send,
+	P: Clone + Fn(ItemServiceRequestSend) -> bool,
+	S: Clone,
 {
-	type Response = S::Response;
+	inner: S,
+	pred: P,
+}
 
-	type Error = volo_thrift::Error;
-
-	type Future<'cx> = impl Future<Output = Result<S::Response, Self::Error>> + 'cx;
-
-	fn call<'cx, 's>(&'s self, cx: &'cx mut Cx, req: Req) -> Self::Future<'cx>
-	where
-		's: 'cx,
-	{
-		async move {
-			if format!("{:?}", req).starts_with("Ping") {
-				return Err(anyhow!("can not use ping").into());
-			}
-			self.0.call(cx, req).await.map_err(Into::into)
+impl<S, P> FilterService<S, P>
+where
+	P: Clone + Fn(ItemServiceRequestSend) -> bool,
+	S: Clone,
+{
+	pub fn new(inner: S, pred: P) -> Self {
+		Self {
+			inner, pred,
 		}
 	}
 }
 
-pub struct FilterLayer;
+impl<Cx, S, P> volo::Service<Cx, ItemServiceRequestSend> for FilterService<S, P>
+where
+	Cx: 'static + Send,
+	S: 'static + volo::Service<Cx, ItemServiceRequestSend> + Send + Sync + Clone,
+	S::Error: Send + Sync,
+	P: 'static + Send + Sync + Clone + Fn(ItemServiceRequestSend) -> bool,
+{
+	type Response = S::Response;
 
-impl<S> volo::Layer<S> for FilterLayer {
-	type Service = FilterService<S>;
+	type Error = volo_thrift::error::Error;
+
+	type Future<'cx> = impl Future<Output = Result<Self::Response, Self::Error>> + Send + 'cx;
+
+	fn call<'cx, 's>(&'s self, cx: &'cx mut Cx, req: ItemServiceRequestSend) -> Self::Future<'cx>
+	where
+		's: 'cx,
+	{
+		let t = (*self).clone();
+		async move {
+			match (t.pred)(req.clone()) {
+				true => {
+					match t.inner.call(cx, req).await {
+						Ok(val) => Ok(val),
+						Err(_) => Err(volo_thrift::error::Error::Application(volo_thrift::ApplicationError {
+							kind: volo_thrift::ApplicationErrorKind::UNKNOWN,
+							message: format!("{}Request filtered{}", ANSI_RED, ANSI_END),
+						}))
+					}
+				},
+				false => {
+					Err(volo_thrift::error::Error::Application(volo_thrift::ApplicationError {
+						kind: volo_thrift::ApplicationErrorKind::UNKNOWN,
+						message: format!("{}Request filtered{}", ANSI_RED, ANSI_END),
+					}))
+				},
+			}
+		}
+	}
+}
+
+pub struct FilterLayer<P>
+where
+	P: Clone + Fn(ItemServiceRequestSend) -> bool,
+{
+	pred: P,
+}
+
+impl<P> FilterLayer<P>  
+where
+	P: Clone + Fn(ItemServiceRequestSend) -> bool,
+{
+	pub fn new(pred: P) -> Self {
+		Self { pred }
+	}
+}
+
+impl<S, P> volo::Layer<S> for FilterLayer<P>
+where
+	P: Clone + Fn(ItemServiceRequestSend) -> bool,
+	S: Clone,
+{
+	type Service = FilterService<S, P>;
 
 	fn layer(self, inner: S) -> Self::Service {
-		FilterService(inner)
+		let predicate = self.pred.clone();
+		FilterService::new(inner, predicate)
 	}
 }

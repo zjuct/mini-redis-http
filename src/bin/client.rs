@@ -10,15 +10,38 @@ use volo_gen::volo::example::{
     DelRequest,
     PublishRequest,
     SubscribeRequest,
+    ItemServiceRequestSend,
+    ItemServicePingArgsSend,
 };
 
 use mini_redis::FilterLayer;
+
+fn filter_ping_evil(req: ItemServiceRequestSend) -> bool {
+    match req {
+        ItemServiceRequestSend::Ping(ItemServicePingArgsSend { req: PingRequest { payload } }) => {
+            match payload {
+                Some(payload) => {
+                    if payload.to_lowercase().starts_with("evil") {
+                        return false;
+                    }
+                    true
+                },
+                None => {
+                    true
+                },
+            }
+        },
+        _ => {
+            true
+        }
+    }
+}
 
 lazy_static! {
     static ref CLIENT: volo_gen::volo::example::ItemServiceClient = {
         let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
         volo_gen::volo::example::ItemServiceClientBuilder::new("volo-example")
-            .layer_outer(FilterLayer)
+            .layer_outer(FilterLayer::new(filter_ping_evil))
             .address(addr)
             .build()
     };
@@ -62,9 +85,6 @@ fn get_input(send: broadcast::Sender<Input>) {
 
         
         let input_vec: Vec<&str> = buf.split_whitespace().collect();
-//        for i in &input_vec {
-//            println!("{i}");
-//        }
         if input_vec.len() == 0 {
             continue;
         }
