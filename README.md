@@ -37,3 +37,5 @@ SUBSCRIBE [channel]...
 `SUBSCRIBE`, `PUBLISH`为ping-pong模型，一次连接发送单个message
 
 ## `Filter`
+
+支持自定义predicate，Filter根据predicate的结果判断是否丢弃请求
