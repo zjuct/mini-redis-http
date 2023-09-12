@@ -1,38 +1,38 @@
-# mini-redis
+# mini-redis-http
 
 - 支持`PING`, `GET`, `SET`, `DEL`, `PUBLISH`, `SUBSCRIBE`命令
 
-- 提供client-cli命令行前端
+- 实现http服务器，监听端口13784
 
 - Filter中间件实现自定义请求过滤
 
 ## `PING`
 
 ```
-PING [string]
+localhost:13784/ping
+localhost:13784/ping/payload
 ```
 
 ## `GET`, `SET`, `DEL`
 
 ```
-GET key
-SET key value
-DEL [key]...
+localhost:13784/get/:key
+localhost:13784/set
+localhost:13784/del
 ```
 
 ## `PUBLISH`, `SUBSCRIBE`
 
 ```
-PUBLISH channel message
-SUBSCRIBE [channel]...
+localhost:13784/publish
+localhost:13784/subscribe
 ```
 
 `PUBLISH`支持广播
 
-1. `cargo run --bin server`启动服务器
-2. 在两个终端通过`cargo run --bin client`启动两个客户端A, B
-3. A运行`SUBSCRIBE hello1 hello2`，订阅两个管道
-4. B运行`PUBLISH hello1 world`，A收到`world`，退出等待
+1. `cargo run --bin server`启动rpc服务器
+2. 在另一终端`cargo run --bin client`启动rpc客户端和http服务器
+3. 使用浏览器或者curl等其它工具，通过上述URL与http服务器通信
 
 `SUBSCRIBE`, `PUBLISH`为ping-pong模型，一次连接发送单个message
 
